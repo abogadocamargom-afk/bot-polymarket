@@ -7,93 +7,84 @@ from datetime import datetime
 TOKEN_BOT = "8711209659:AAGgPpw1mxx9LMfiJ0MRcBATRaxInsWqIV8"
 ID_CHAT = "8666845968"
 
-st.set_page_config(page_title="Simulador Arbitraje - Nicolas", layout="wide")
+st.set_page_config(page_title="Simulador Pro - Nicolas", layout="wide")
 
 if 'saldo_virtual' not in st.session_state:
     st.session_state.saldo_virtual = 1000.0
 if 'historial' not in st.session_state:
     st.session_state.historial = []
 
-st.title("⚖️ Simulador de Arbitraje: Modo Paper Trading")
-
 def enviar_telegram(mensaje):
     url = f"https://api.telegram.org/bot{TOKEN_BOT}/sendMessage"
     try: requests.post(url, data={"chat_id": ID_CHAT, "text": mensaje}, timeout=5)
     except: pass
 
-def cargar_datos():
-    btc_price = 0
-    # Intento 1: CoinGecko
+def obtener_precio_btc():
+    # Intento 1: Binance (Suele ser el más estable)
     try:
-        r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", timeout=10)
-        btc_price = r.json()['bitcoin']['usd']
+        return float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()['price'])
     except:
-        # Intento 2: Alternativa (Binance Public API)
+        # Intento 2: CoinGecko
         try:
-            r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10)
-            btc_price = float(r.json()['price'])
+            return float(requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", timeout=5).json()['bitcoin']['usd'])
         except:
-            btc_price = 0
-            
-    # Mercados de Polymarket
+            # Intento 3: KuCoin
+            try:
+                return float(requests.get("https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=BTC-USDT", timeout=5).json()['data']['price'])
+            except:
+                return 0
+
+def obtener_mercados():
     try:
-        poly = requests.get("https://clob.polymarket.com/markets", params={"active": True, "limit": 100}, timeout=10).json()
+        return requests.get("https://clob.polymarket.com/markets", params={"active": True, "limit": 100}, timeout=10).json()
     except:
-        poly = []
-        
-    return btc_price, poly
+        return []
 
-precio_btc, mercados = cargar_datos()
+# Ejecución
+st.title("⚖️ Centro de Mando: Arbitraje Simulado")
+precio_btc = obtener_precio_btc()
+mercados = obtener_mercados()
 
-# --- PANEL DE CONTROL ---
-col_a, col_b, col_c = st.columns(3)
-with col_a: 
-    st.metric("BTC Actual", f"${precio_btc:,} USD" if precio_btc > 0 else "Conectando...")
-with col_b: 
-    st.metric("Saldo Virtual", f"${st.session_state.saldo_virtual:,.2f} USD")
-with col_c: 
-    lucro = st.session_state.saldo_virtual - 1000
-    st.metric("Ganancia Total", f"${lucro:,.2f} USD", delta=f"{lucro:.2f}")
+# --- PANEL VISUAL ---
+c1, c2, c3 = st.columns(3)
+with c1: 
+    st.metric("BTC Actual", f"${precio_btc:,} USD" if precio_btc > 0 else "Error de Red")
+with c2: 
+    st.metric("Saldo Virtual", f"${st.session_state.saldo_virtual:,.2f}")
+with c3:
+    st.metric("Ganancia Total", f"${st.session_state.saldo_virtual - 1000:,.2f}")
 
-if st.button('🚀 ESCANEAR Y OPERAR'):
+if st.button('🚀 REINTENTAR CONEXIÓN'):
     st.rerun()
 
 st.divider()
 
-# --- LÓGICA DE OPERACIÓN ---
-if precio_btc > 0 and isinstance(mercados, list):
-    lista_analisis = []
-    for m in mercados:
-        pregunta = m.get('question', '')
-        if any(x in pregunta.upper() for x in ["BITCOIN", "BTC"]):
-            precios = m.get('outcome_prices', {})
-            if precios and 'yes' in precios:
-                precio_poly = float(precios['yes'])
-                
-                # Simulamos ganancia si detectamos brecha de precio bajo
-                if precio_poly < 0.50:
-                    ganancia_simulada = 5.0
-                    st.session_state.saldo_virtual += ganancia_simulada
-                    st.session_state.historial.append({
-                        "Hora": datetime.now().strftime("%H:%M:%S"),
-                        "Mercado": pregunta[:50] + "...",
-                        "Beneficio": f"+${ganancia_simulada}"
-                    })
-                    enviar_telegram(f"💰 Op. Virtual exitosa!\nEvento: {pregunta[:30]}...\nBeneficio: +$5.00")
-
-                lista_analisis.append({
-                    "Mercado": pregunta,
-                    "Precio Poly": precio_poly,
-                    "Acción": "✅ COMPRA" if precio_poly < 0.50 else "Mirar"
-                })
-    
-    if lista_analisis:
-        st.dataframe(pd.DataFrame(lista_analisis), use_container_width=True)
+if precio_btc > 0:
+    st.success(f"Conexión establecida. Monitoreando Polymarket...")
+    # Lógica de simulación
+    if isinstance(mercados, list) and len(mercados) > 0:
+        resumen = []
+        for m in mercados:
+            pregunta = m.get('question', '')
+            if "Bitcoin" in pregunta or "BTC" in pregunta:
+                precios = m.get('outcome_prices', {})
+                if precios and 'yes' in precios:
+                    p_poly = float(precios['yes'])
+                    # Simulación simple de compra si está barato (< 0.40)
+                    if p_poly < 0.40:
+                        st.session_state.saldo_virtual += 2.0
+                        st.session_state.historial.append({"Hora": datetime.now().strftime("%H:%M"), "Evento": pregunta[:40], "Ganancia": "+$2.00"})
+                    resumen.append({"Mercado": pregunta, "Precio Poly": p_poly})
+        
+        if resumen:
+            st.dataframe(pd.DataFrame(resumen), use_container_width=True)
+        else:
+            st.warning("No hay mercados de BTC activos en este momento.")
     else:
-        st.info("No se encontraron mercados de Bitcoin en este escaneo.")
+        st.error("No se pudo obtener datos de Polymarket. Intenta en unos segundos.")
 else:
-    st.error("Error de conexión. Presiona el botón de Escanear de nuevo en 10 segundos.")
+    st.warning("Aún no tenemos el precio de BTC. Reintentando automáticamente...")
 
 if st.session_state.historial:
-    st.subheader("📜 Historial de Operaciones Ganadoras")
-    st.table(pd.DataFrame(st.session_state.historial).tail(5))
+    st.write("### 📜 Actividad del Simulador")
+    st.table(pd.DataFrame(st.session_state.historial).tail(3))
