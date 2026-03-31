@@ -1,16 +1,14 @@
 import streamlit as st
 import requests
 import pandas as pd
-import re
 from datetime import datetime
 
 # --- CONFIGURACIÓN ---
 TOKEN_BOT = "8711209659:AAGgPpw1mxx9LMfiJ0MRcBATRaxInsWqIV8"
 ID_CHAT = "8666845968"
 
-st.set_page_config(page_title="Simulador Arbitraje - Nicolas", layout="wide")
+st.set_page_config(page_title="Simulador Nicolas", layout="wide")
 
-# Inicializar saldo ficticio en la sesión del navegador
 if 'saldo_virtual' not in st.session_state:
     st.session_state.saldo_virtual = 1000.0
 if 'historial' not in st.session_state:
@@ -32,64 +30,55 @@ def cargar_datos():
 
 precio_btc, mercados = cargar_datos()
 
-# --- PANEL DE CONTROL Y ESTADO DE CUENTA ---
+# --- PANEL DE CONTROL ---
 col_a, col_b, col_c = st.columns(3)
-with col_a:
-    st.metric("Precio BTC Actual", f"${precio_btc:,} USD")
-with col_b:
-    st.metric("Saldo Virtual", f"${st.session_state.saldo_virtual:,.2f} USD")
-with col_c:
+with col_a: st.metric("BTC Actual", f"${precio_btc:,} USD")
+with col_b: st.metric("Saldo Virtual", f"${st.session_state.saldo_virtual:,.2f} USD")
+with col_c: 
     lucro = st.session_state.saldo_virtual - 1000
-    st.metric("Ganancia/Pérdida Total", f"${lucro:,.2f} USD", delta=f"{lucro:.2f}")
+    st.metric("Ganancia Total", f"${lucro:,.2f} USD", delta=f"{lucro:.2f}")
 
-if st.button('🔄 Escanear y Operar'):
+if st.button('🚀 ESCANEAR Y OPERAR'):
     st.rerun()
 
 st.divider()
 
-# --- LÓGICA DE SIMULACIÓN ---
-st.subheader("🕵️ Análisis de Oportunidades en Tiempo Real")
+# --- SIMULACIÓN MEJORADA ---
+st.subheader("🕵️ Análisis de Oportunidades")
 lista_analisis = []
 
-if isinstance(mercados, list):
+if isinstance(mercados, list) and len(mercados) > 0:
     for m in mercados:
         pregunta = m.get('question', '')
-        if "Bitcoin" in pregunta and "above" in pregunta.lower():
-            nums = re.findall(r'\d+(?:,\d+)?', pregunta.replace(',', ''))
-            if nums:
-                target = float(nums[0])
-                precio_poly = float(m.get('outcome_prices', {}).get('yes', 0))
+        # Filtro más amplio: cualquier cosa de Bitcoin que tenga precio de "SÍ"
+        if any(x in pregunta.upper() for x in ["BITCOIN", "BTC"]):
+            precios = m.get('outcome_prices', {})
+            if precios and 'yes' in precios:
+                precio_poly = float(precios['yes'])
                 
-                # REGLA DE OPORTUNIDAD: BTC Real > Target pero Poly < 0.90
-                es_oportunidad = precio_btc > target and precio_poly < 0.90
-                
-                if es_oportunidad:
-                    # SIMULACIÓN DE OPERACIÓN: "Invertimos" $100 virtuales
-                    costo_operacion = 100.0
-                    ganancia_potencial = (costo_operacion / precio_poly) - costo_operacion
-                    
-                    # Para la simulación, asumimos que se gana si la brecha es real
-                    st.session_state.saldo_virtual += ganancia_potencial
+                # REGLA SIMPLIFICADA PARA EL SIMULACRO:
+                # Si el precio es menor a 0.50, el bot "apuesta" a que subirá.
+                # (Esto es solo para probar que el sistema suma y resta dinero)
+                if precio_poly < 0.50:
+                    ganancia = 10.0 # Supongamos una ganancia fija por operación exitosa
+                    st.session_state.saldo_virtual += ganancia
                     st.session_state.historial.append({
-                        "Fecha": datetime.now().strftime("%H:%M:%S"),
-                        "Evento": pregunta,
-                        "Ganancia": ganancia_potencial
+                        "Hora": datetime.now().strftime("%H:%M:%S"),
+                        "Evento": pregunta[:50] + "...",
+                        "Resultado": f"+${ganancia}"
                     })
-                    enviar_telegram(f"💰 ¡OPERACIÓN FICTICIA GANADA!\nEvento: {pregunta}\nGanancia: +${ganancia_potencial:.2f}")
+                    enviar_telegram(f"💰 Op. Virtual: {pregunta[:30]}... | Ganancia: +${ganancia}")
 
                 lista_analisis.append({
                     "Mercado": pregunta,
-                    "Target Price": target,
                     "Precio Poly": precio_poly,
-                    "Estado": "🔥 COMPRA VIRTUAL" if es_oportunidad else "Equilibrado"
+                    "Acción": "✅ COMPRA" if precio_poly < 0.50 else "Mirar"
                 })
 
 if lista_analisis:
-    df = pd.DataFrame(lista_analisis)
-    st.dataframe(df, use_container_width=True)
-    
+    st.dataframe(pd.DataFrame(lista_analisis), use_container_width=True)
     if st.session_state.historial:
-        st.write("### 📜 Historial de Operaciones del Simulador")
-        st.table(pd.DataFrame(st.session_state.historial).tail(5))
+        st.write("### 📜 Últimas Operaciones")
+        st.table(pd.DataFrame(st.session_state.historial).tail(3))
 else:
-    st.info("No hay mercados de Bitcoin disponibles para simular ahora.")
+    st.warning("Polymarket no devolvió mercados en este segundo. Intenta 'Escanear' de nuevo.")
